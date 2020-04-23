@@ -1,79 +1,70 @@
 package com.community.batch.jobs.inactive;
 
-import java.time.LocalDateTime;
-import java.util.List;
-
-import javax.persistence.EntityManagerFactory;
+import java.util.stream.IntStream;
 
 import org.springframework.batch.core.Job;
 import org.springframework.batch.core.Step;
 import org.springframework.batch.core.configuration.annotation.JobBuilderFactory;
-import org.springframework.batch.core.configuration.annotation.JobScope;
 import org.springframework.batch.core.configuration.annotation.StepBuilderFactory;
-import org.springframework.batch.core.configuration.annotation.StepScope;
-import org.springframework.batch.item.ItemProcessor;
-import org.springframework.batch.item.ItemWriter;
+import org.springframework.batch.core.job.builder.FlowBuilder;
+import org.springframework.batch.core.job.flow.Flow;
+import org.springframework.batch.core.job.flow.FlowExecutionStatus;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Primary;
-
-import com.community.batch.domain.User;
-import com.community.batch.domain.enums.UserStatus;
-import com.community.batch.jobs.inactive.listener.InactiveChunkListener;
-import com.community.batch.jobs.inactive.listener.InactiveIJobListener;
-import com.community.batch.jobs.inactive.listener.InativeStepListener;
-import com.community.batch.jobs.readers.QueueItemReader;
-import com.community.batch.repository.UserRepository;
+import org.springframework.core.task.SimpleAsyncTaskExecutor;
+import org.springframework.core.task.TaskExecutor;
 
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 
-@Slf4j
 @RequiredArgsConstructor
 @Configuration
 public class InactiveUserJobConfig {
 
-	private final static int CHUNK_SIZE = 6;
 	private final JobBuilderFactory jobBuilderFactory;
 	private final StepBuilderFactory stepBuilderFactory;
 	
-	private final UserRepository userRepository;
-	
-	@Primary
 	@Bean
-	public Job inactiveUserJob(InactiveIJobListener inactiveIJobListener,Step inactiveUserStep) {
+	public TaskExecutor taskExecutor() {
+		return new SimpleAsyncTaskExecutor("Batch_Task");
+	}
+	
+	@Bean 
+	public Job inactiveUserJob(Step inactiveUserTaskletStep) { 
 		return jobBuilderFactory.get("inactiveUserJob")
 				.preventRestart()
-				.listener(inactiveIJobListener)
-				.start(inactiveUserStep)
+				//.start(inactiveUserFlow(inactiveUserTaskletStep))
+				.start(multiFlow(inactiveUserTaskletStep))
+				.end()
 				.build();
+	}
+	
+	//Tasklet
+	@Bean
+	public Step inactiveUserTaskletStep(InactiveItemTasklet inactiveItemTasklet) { 
+		return stepBuilderFactory.get("inactiveUserTaskletStep")
+				.tasklet(inactiveItemTasklet)
+				.build(); 
 	}
 
 	@Bean
-	@JobScope
-	public Step inactiveUserStep(InactiveChunkListener inactiveChunkListener, InativeStepListener inativeStepListener) {
-		return stepBuilderFactory.get("inactiveUserStep")
-				.<User, User>chunk(CHUNK_SIZE)
-				.reader(inactiveUserReader())
-				.processor(inactiveUserProcessor())
-				.writer(inactiveUserWriter())
-				.listener(inativeStepListener)
-				.listener(inactiveChunkListener)
+	public Flow multiFlow(Step inactiveUserTaskletStep) {
+		Flow flows[] = new Flow[5];
+		IntStream.range(0, flows.length).forEach(i -> flows[i] = new FlowBuilder<Flow>("MultiFlow"+i).from(inactiveUserFlow(inactiveUserTaskletStep)).end());
+		FlowBuilder<Flow> flowBuilder = new FlowBuilder<>("MutiFlowTest");
+		return flowBuilder
+				.split(taskExecutor())
+				.add(flows)
 				.build();
 	}
-
-    @Bean
-    @StepScope
-    public QueueItemReader<User> inactiveUserReader() {
-        List<User> oldUsers = userRepository.findByUpdatedDateBeforeAndStatusEquals(LocalDateTime.now().minusYears(1), UserStatus.ACTIVE);
-        return new QueueItemReader<>(oldUsers);
-    }
-
-    public ItemProcessor<User, User> inactiveUserProcessor() {
-        return User::setInactive;
-    }
-
-    public ItemWriter<User> inactiveUserWriter() {
-        return ((List<? extends User> users) -> userRepository.saveAll(users));
-    }
+	
+	//빈으로 생성하면 싱글톤이기 때문에 멀티 Flow를 위해서는 빈으로 등록하면 안됨
+	public Flow inactiveUserFlow(Step inactiveUserTaskletStep) {
+		FlowBuilder<Flow> flowBuilder = new FlowBuilder<>("inactiveUserFlow");
+		return flowBuilder
+				.start(new InactiveJobExecutionDecider())
+				.on(FlowExecutionStatus.FAILED.getName()).end()
+				.on(FlowExecutionStatus.COMPLETED.getName()).to(inactiveUserTaskletStep)
+				.end();
+	}
+	
 }
