@@ -1,0 +1,33 @@
+spring:
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/autoconfiguration?serverTimezone=UTC
+    username: root
+    password: root
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    show-sql: false
+    hibernate:
+      ddl-auto: create
+  batch:
+    job:
+      enabled: false 
+    
+server:
+  port: 8081
+
+  
+logging:
+  group:
+    tomcat: org.apache.catalina, org.apache.coyote, org.apache.tomcat
+    sql: org.springframework.jdbc.core, org.jooq.tools.LoggerListener, org.hibernate
+#    web: org.springframework.core.codec, org.springframework.http, org.springframework.web, org.springframework.boot.actuate.endpoint.web, org.springframework.boot.web.servlet.ServletContextInitializerBeans 
+  level:
+    root: info
+    org.springframework.batch: debug
+    com.community: debug
+    org.hibernate: debug
+    org.hibernate.hql: info
+    org.hibernate.engine: info
+    org.hibernate.loader: info
+    org.hibernate.SQL: info
+    
